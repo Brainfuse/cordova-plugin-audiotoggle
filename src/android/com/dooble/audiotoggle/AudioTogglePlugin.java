@@ -13,6 +13,14 @@ import org.apache.cordova.CordovaPlugin;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.BroadcastReceiver;
+import org.apache.cordova.CordovaWebView;
+import org.apache.cordova.CordovaInterface;
+import org.apache.cordova.PluginResult;
+import org.apache.cordova.PluginResult.Status;
+import android.util.Log;
 
 public class AudioTogglePlugin extends CordovaPlugin {
   public static final String ACTION_SET_AUDIO_MODE = "setAudioMode";
@@ -24,6 +32,38 @@ public class AudioTogglePlugin extends CordovaPlugin {
   public static final String ACTION_IS_BLUETOOTH_ON = "isBluetoothScoOn";
   public static final String ACTION_HAS_EARPIECE = "hasBuiltInEarpiece";
   public static final String ACTION_HAS_SPEAKER = "hasBuiltInSpeaker";
+  public static final String ACIONT_REGISTER_LISTENER = "registerListener";
+
+  private static final String LOG_TAG = "AudioTogglePlugin";
+  BroadcastReceiver receiver;
+  CallbackContext speakerListener;
+
+  public AudioTogglePlugin(){
+    receiver = null;
+    speakerListener = null;
+  } 
+
+  @Override
+  public void initialize(CordovaInterface cordova, CordovaWebView webView) {
+      super.initialize(cordova, webView);
+      IntentFilter intentFilter = new IntentFilter();
+      intentFilter.addAction(Intent.ACTION_HEADSET_PLUG);
+      intentFilter.addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED);
+     // this requires api 29
+     // intentFilter.addAction(AudioManager.ACTION_SPEAKERPHONE_STATE_CHANGED);
+      this.receiver = new BroadcastReceiver() {
+          @Override
+          public void onReceive(Context context, Intent intent) {
+                Boolean isSpeakerOn = isSpeakerphoneOn();
+                if(speakerListener != null ){
+                    PluginResult result = new PluginResult(Status.OK, isSpeakerOn.toString());
+                    result.setKeepCallback(true);
+                    speakerListener.sendPluginResult(result);
+                }
+          }
+      };
+      webView.getContext().registerReceiver(this.receiver, intentFilter);
+  }  
 
   @Override
   public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
@@ -57,6 +97,12 @@ public class AudioTogglePlugin extends CordovaPlugin {
       return true;
     } else if (action.equals(ACTION_HAS_SPEAKER)) {
       callbackContext.success(hasBuiltInSpeaker().toString());
+      return true;
+    } else if(action.equals(ACIONT_REGISTER_LISTENER)){
+      String eventName = args.getString(0);
+      if("speaker".equalsIgnoreCase(eventName)){
+        this.speakerListener = callbackContext;
+      }
       return true;
     }
 
