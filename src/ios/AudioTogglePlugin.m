@@ -16,8 +16,8 @@ NSString *const AudioOptionsAvailable = @"audioOutputsAvailable";
 
 - (void) pluginInitialize {
 	self.eventCallbacks = [NSMutableDictionary dictionaryWithCapacity:2];
-	[self.eventCallbacks setValue:[NSMutableArray array] forKey:@"speaker"];
-	[self.eventCallbacks setValue:[NSMutableArray array] forKey:@"audioOutputsAvailable"];
+	[self.eventCallbacks setValue:[NSString string] forKey:@"speaker"];
+	[self.eventCallbacks setValue:[NSString string] forKey:@"audioOutputsAvailable"];
 
 	self.audioOutputsAvailable = false;
 	
@@ -28,13 +28,12 @@ NSString *const AudioOptionsAvailable = @"audioOutputsAvailable";
 - (void) audioRoutingOptionsChangeDetector:(BOOL) newValue {
 	if	(newValue != self.audioOutputsAvailable) {
 		self.audioOutputsAvailable = newValue;
-		
-		for (id callbackId in self.eventCallbacks[@"audioOutputsAvailable"]) {
-			CDVPluginResult* pluginResult = nil;
-			pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:self.audioOutputsAvailable];
-			[pluginResult setKeepCallbackAsBool:YES];
-			[self.commandDelegate sendPluginResult:pluginResult callbackId:callbackId];
-		}
+        id callbackId = self.eventCallbacks[@"audioOutputsAvailable"];
+        CDVPluginResult* pluginResult = nil;
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:self.audioOutputsAvailable];
+        [pluginResult setKeepCallbackAsBool:YES];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:callbackId];
+    
 	}
 }
 
@@ -91,9 +90,10 @@ NSString *const AudioOptionsAvailable = @"audioOutputsAvailable";
 
 - (void) registerListener:(CDVInvokedUrlCommand *)command {
 	NSString* eventName = command.arguments.firstObject;
-	if(self.eventCallbacks[eventName] != nil) {
-		[self.eventCallbacks[eventName] addObject:command.callbackId];
-	}
+	//if(self.eventCallbacks[eventName] != nil) {
+    [self.eventCallbacks setValue:command.callbackId forKey:eventName];
+
+	//}
 }
 
 - (void)handleAudioRouteChange:(NSNotification *) notification
@@ -103,13 +103,13 @@ NSString *const AudioOptionsAvailable = @"audioOutputsAvailable";
 	AVAudioSessionRouteDescription* currentRoute = [AVAudioSession sharedInstance].currentRoute;
 	if([currentRoute.outputs count] > 0 && (reasonValue == AVAudioSessionRouteChangeReasonOverride || reasonValue == AVAudioSessionRouteChangeReasonCategoryChange)) {
 		AVAudioSessionPortDescription *output = currentRoute.outputs.firstObject;
+        id callbackId = self.eventCallbacks[@"speaker"];
 		
-		for (id callbackId in self.eventCallbacks[@"speaker"]) {
-			CDVPluginResult* pluginResult = nil;
-			pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:[output.portType isEqual: @"Speaker"]];
-			[pluginResult setKeepCallbackAsBool:YES];
-			[self.commandDelegate sendPluginResult:pluginResult callbackId:callbackId];
-		}
+        CDVPluginResult* pluginResult = nil;
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:[output.portType isEqual: @"Speaker"]];
+        [pluginResult setKeepCallbackAsBool:YES];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:callbackId];
+
 	}
 }
 
