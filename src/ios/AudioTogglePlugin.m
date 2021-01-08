@@ -49,14 +49,21 @@ NSString *const AudioOptionsAvailable = @"audioOutputsAvailable";
 	return hasOptions;
 }
 - (BOOL) isSpeakerphoneOn:(CDVInvokedUrlCommand *)command {
+    BOOL isSpeakerPhoneOn = false;
     AVAudioSessionRouteDescription *currentRoute = [AVAudioSession sharedInstance].currentRoute;
-    AVAudioSessionPortDescription *output = currentRoute.outputs.firstObject;
-        
+    if(currentRoute != nil){
+        if(currentRoute.outputs.count > 0){
+            AVAudioSessionPortDescription *output = currentRoute.outputs.firstObject;
+            if(output != nil){
+                isSpeakerPhoneOn = [output.portType isEqual: @"Speaker"];
+            }
+        }
+    }
     CDVPluginResult* pluginResult = nil;
-    pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:[output.portType isEqual: @"Speaker"]];
+    pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:isSpeakerPhoneOn];
     
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
-    return [output.portType isEqual: @"Speaker"];
+    return isSpeakerPhoneOn;
 }
 
 
