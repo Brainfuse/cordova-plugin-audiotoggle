@@ -21,6 +21,7 @@ import org.apache.cordova.CordovaInterface;
 import org.apache.cordova.PluginResult;
 import org.apache.cordova.PluginResult.Status;
 import android.util.Log;
+import android.os.Build;
 
 public class AudioTogglePlugin extends CordovaPlugin {
   public static final String ACTION_SET_AUDIO_MODE = "setAudioMode";
@@ -170,7 +171,24 @@ public class AudioTogglePlugin extends CordovaPlugin {
     final Context context = webView.getContext();
     final AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
 
-    audioManager.setSpeakerphoneOn(on);
+    if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S){
+         if(on){
+             setCommunicationDevice(AudioManager, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER);
+         }else{
+             setCommunicationDevice(AudioManager, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE);
+         }
+    }else {
+        audioManager.setSpeakerphoneOn(on);
+    }
+
+  }
+
+  private void setCommunicationDevice(AudioManager audioManager, Integer targetDeviceType) {
+      for (AudioDeviceInfo device: devices) {
+          if (device.getType() == targetDeviceType) {
+              boolean result = audioManager.setCommunicationDevice(device);
+          }
+      }
   }
 
   public boolean setAudioMode(String mode) {
