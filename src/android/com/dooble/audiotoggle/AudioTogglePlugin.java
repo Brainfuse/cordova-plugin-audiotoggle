@@ -185,7 +185,7 @@ public class AudioTogglePlugin extends CordovaPlugin {
   }
 
   private void setCommunicationDevice(AudioManager audioManager, Integer targetDeviceType) {
-      for (AudioDeviceInfo device: devices) {
+      for (AudioDeviceInfo device: audioManager.getAvailableCommunicationDevices()) {
           if (device.getType() == targetDeviceType) {
               boolean result = audioManager.setCommunicationDevice(device);
           }
