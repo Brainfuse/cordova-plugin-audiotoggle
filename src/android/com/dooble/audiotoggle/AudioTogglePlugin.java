@@ -170,8 +170,9 @@ public class AudioTogglePlugin extends CordovaPlugin {
   public void setSpeakerphoneOn(boolean on) {
     final Context context = webView.getContext();
     final AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
-
-    if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S){
+    
+    //Build.VERSION_CODES.S = 31
+    if(Build.VERSION.SDK_INT >= 31){
          if(on){
              setCommunicationDevice(AudioManager, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER);
          }else{
