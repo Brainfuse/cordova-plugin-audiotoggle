@@ -174,9 +174,9 @@ public class AudioTogglePlugin extends CordovaPlugin {
     //Build.VERSION_CODES.S = 31
     if(Build.VERSION.SDK_INT >= 31){
          if(on){
-             setCommunicationDevice(AudioManager, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER);
+             setCommunicationDevice(audioManager, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER);
          }else{
-             setCommunicationDevice(AudioManager, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE);
+             setCommunicationDevice(audioManager, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE);
          }
     }else {
         audioManager.setSpeakerphoneOn(on);
