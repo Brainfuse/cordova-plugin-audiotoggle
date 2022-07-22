@@ -22,6 +22,8 @@ import org.apache.cordova.PluginResult;
 import org.apache.cordova.PluginResult.Status;
 import android.util.Log;
 import android.os.Build;
+import androidx.annotation.RequiresApi;
+import java.lang.reflect.InvocationTargetException;
 
 public class AudioTogglePlugin extends CordovaPlugin {
   public static final String ACTION_SET_AUDIO_MODE = "setAudioMode";
@@ -168,26 +170,33 @@ public class AudioTogglePlugin extends CordovaPlugin {
   }
 
   public void setSpeakerphoneOn(boolean on) {
-    final Context context = webView.getContext();
-    final AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
-   
-    if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S){
-         if(on){
-             setCommunicationDevice(audioManager, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER);
-         }else{
-             setCommunicationDevice(audioManager, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE);
-         }
-    }else {
-        audioManager.setSpeakerphoneOn(on);
-    }
+      final Context context = webView.getContext();
+      final AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
 
+      if(isAfter31()){
+          int deviceType = on ? AudioDeviceInfo.TYPE_BUILTIN_SPEAKER : AudioDeviceInfo.TYPE_BUILTIN_EARPIECE;
+          setCommunicationDevice(mgr, deviceType);
+      }else {
+          audioManager.setSpeakerphoneOn(on);
+      }
   }
 
-  private void setCommunicationDevice(AudioManager audioManager, Integer targetDeviceType) {
-      for (AudioDeviceInfo device: audioManager.getAvailableCommunicationDevices()) {
-          if (device.getType() == targetDeviceType) {
-              boolean result = audioManager.setCommunicationDevice(device);
+  private boolean isAfter31() {
+      return Build.VERSION.SDK_INT >= 31;
+  }
+
+  @RequiresApi(api = Build.VERSION_CODES.M)
+  private void setCommunicationDevice(AudioManager mgr, int deviceType) {
+      try {
+          List<AudioDeviceInfo> devices = (List<AudioDeviceInfo>) mgr.getClass().getMethod("getAvailableCommunicationDevices").invoke(mgr);
+          for (AudioDeviceInfo device : devices) {
+              if (device.getType() == deviceType) {
+                  mgr.getClass().getMethod("setCommunicationDevice").invoke(mgr, device);
+                  return;
+              }
           }
+      } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
+          e.printStackTrace();
       }
   }
 
