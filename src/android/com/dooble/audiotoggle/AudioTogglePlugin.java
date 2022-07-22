@@ -22,7 +22,6 @@ import org.apache.cordova.PluginResult;
 import org.apache.cordova.PluginResult.Status;
 import android.util.Log;
 import android.os.Build;
-import androidx.annotation.RequiresApi;
 import java.lang.reflect.InvocationTargetException;
 
 public class AudioTogglePlugin extends CordovaPlugin {
@@ -175,7 +174,7 @@ public class AudioTogglePlugin extends CordovaPlugin {
 
       if(isAfter31()){
           int deviceType = on ? AudioDeviceInfo.TYPE_BUILTIN_SPEAKER : AudioDeviceInfo.TYPE_BUILTIN_EARPIECE;
-          setCommunicationDevice(mgr, deviceType);
+          setCommunicationDevice(audioManager, deviceType);
       }else {
           audioManager.setSpeakerphoneOn(on);
       }
@@ -185,7 +184,6 @@ public class AudioTogglePlugin extends CordovaPlugin {
       return Build.VERSION.SDK_INT >= 31;
   }
 
-  @RequiresApi(api = Build.VERSION_CODES.M)
   private void setCommunicationDevice(AudioManager mgr, int deviceType) {
       try {
           List<AudioDeviceInfo> devices = (List<AudioDeviceInfo>) mgr.getClass().getMethod("getAvailableCommunicationDevices").invoke(mgr);
