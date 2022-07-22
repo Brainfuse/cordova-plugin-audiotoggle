@@ -195,7 +195,11 @@ public class AudioTogglePlugin extends CordovaPlugin {
                   return;
               }
           }
-      } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
+      } catch (IllegalAccessException e){
+          e.printStackTrace();
+      } catch(InvocationTargetException e){
+          e.printStackTrace();
+      } catch(NoSuchMethodException e) {
           e.printStackTrace();
       }
   }
