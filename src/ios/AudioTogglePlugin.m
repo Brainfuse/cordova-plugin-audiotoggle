@@ -16,19 +16,29 @@ NSString *const AudioOptionsAvailable = @"audioOutputsAvailable";
 
 - (void) pluginInitialize {
 	self.eventCallbacks = [NSMutableDictionary dictionaryWithCapacity:2];
-	[self.eventCallbacks setValue:[NSString string] forKey:@"speaker"];
-	[self.eventCallbacks setValue:[NSString string] forKey:@"audioOutputsAvailable"];
 
 	self.audioOutputsAvailable = false;
 	
 	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleAudioRouteChange:) name:AVAudioSessionRouteChangeNotification object:nil];
 }
 
+- (NSString *)callbackIdForEvent:(NSString *)eventName {
+	id callbackId = self.eventCallbacks[eventName];
+	if (![callbackId isKindOfClass:[NSString class]]) {
+		return nil;
+	}
+	NSString *callbackIdString = (NSString *)callbackId;
+	return callbackIdString.length > 0 ? callbackIdString : nil;
+}
+
 
 - (void) audioRoutingOptionsChangeDetector:(BOOL) newValue {
 	if	(newValue != self.audioOutputsAvailable) {
 		self.audioOutputsAvailable = newValue;
-        id callbackId = self.eventCallbacks[@"audioOutputsAvailable"];
+		NSString *callbackId = [self callbackIdForEvent:@"audioOutputsAvailable"];
+		if (!callbackId) {
+			return;
+		}
         CDVPluginResult* pluginResult = nil;
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:self.audioOutputsAvailable];
         [pluginResult setKeepCallbackAsBool:YES];
@@ -42,6 +52,9 @@ NSString *const AudioOptionsAvailable = @"audioOutputsAvailable";
 	
 	BOOL hasOptions = inputs.count > 1;
 	[self audioRoutingOptionsChangeDetector: hasOptions];
+	if (!command) {
+		return hasOptions;
+	}
 	
 	CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:hasOptions];
 	[self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
@@ -121,7 +134,10 @@ NSString *const AudioOptionsAvailable = @"audioOutputsAvailable";
 	AVAudioSessionRouteDescription* currentRoute = [AVAudioSession sharedInstance].currentRoute;
 	if([currentRoute.outputs count] > 0 && (reasonValue == AVAudioSessionRouteChangeReasonOverride || reasonValue == AVAudioSessionRouteChangeReasonCategoryChange)) {
 		AVAudioSessionPortDescription *output = currentRoute.outputs.firstObject;
-        id callbackId = self.eventCallbacks[@"speaker"];
+		NSString *callbackId = [self callbackIdForEvent:@"speaker"];
+		if (!callbackId) {
+			return;
+		}
 		
         CDVPluginResult* pluginResult = nil;
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:[output.portType isEqual: @"Speaker"]];
