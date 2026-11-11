@@ -6,6 +6,27 @@
 NSString *const SpeakerSelectedNotification = @"speaker";
 NSString *const AudioOptionsAvailable = @"audioOutputsAvailable";
 
+static NSString *AudioToggleReasonName(AVAudioSessionRouteChangeReason reason) {
+	switch (reason) {
+		case AVAudioSessionRouteChangeReasonNewDeviceAvailable: return @"newDeviceAvailable";
+		case AVAudioSessionRouteChangeReasonOldDeviceUnavailable: return @"oldDeviceUnavailable";
+		case AVAudioSessionRouteChangeReasonCategoryChange: return @"categoryChange";
+		case AVAudioSessionRouteChangeReasonOverride: return @"override";
+		case AVAudioSessionRouteChangeReasonWakeFromSleep: return @"wakeFromSleep";
+		case AVAudioSessionRouteChangeReasonNoSuitableRouteForCategory: return @"noSuitableRouteForCategory";
+		case AVAudioSessionRouteChangeReasonRouteConfigurationChange: return @"routeConfigurationChange";
+		default: return [NSString stringWithFormat:@"%lu", (unsigned long)reason];
+	}
+}
+
+static NSString *AudioTogglePorts(NSArray<AVAudioSessionPortDescription *> *ports) {
+	NSMutableArray<NSString *> *names = [NSMutableArray arrayWithCapacity:ports.count];
+	for (AVAudioSessionPortDescription *port in ports) {
+		[names addObject:[NSString stringWithFormat:@"%@:%@", port.portType, port.portName]];
+	}
+	return [NSString stringWithFormat:@"[%@]", [names componentsJoinedByString:@", "]];
+}
+
 @interface AudioTogglePlugin()
 @property (nonatomic, strong) NSMutableDictionary *eventCallbacks;
 @property (nonatomic, strong) MPVolumeView *volumeView;
@@ -98,6 +119,18 @@ NSString *const AudioOptionsAvailable = @"audioOutputsAvailable";
 	} else if ([mode isEqualToString:@"normal"]) {
 		[session setCategory:AVAudioSessionCategorySoloAmbient error:&err];
 	}
+
+	[self logRoute:[NSString stringWithFormat:@"setAudioMode %@%@", mode,
+		err ? [NSString stringWithFormat:@" error=%@", err.localizedDescription] : @""]];
+}
+
+- (void) logRoute:(NSString *)why {
+	AVAudioSession *session = [AVAudioSession sharedInstance];
+	AVAudioSessionRouteDescription *route = session.currentRoute;
+	NSLog(@"[AudioToggle] %@: out=%@ in=%@ available=%@ category=%@ options=0x%lx mode=%@",
+		why, AudioTogglePorts(route.outputs), AudioTogglePorts(route.inputs),
+		AudioTogglePorts(session.availableInputs), session.category,
+		(unsigned long)session.categoryOptions, session.mode);
 }
 
 -(void) displayIOSAudioRoutingComponent:(CDVInvokedUrlCommand *)command {
@@ -125,12 +158,16 @@ NSString *const AudioOptionsAvailable = @"audioOutputsAvailable";
     [self.eventCallbacks setValue:command.callbackId forKey:eventName];
 
 	//}
+	[self logRoute:[NSString stringWithFormat:@"listener %@", eventName]];
 }
 
 - (void)handleAudioRouteChange:(NSNotification *) notification
 {
 	[self checkAudioRoutingOptions:nil];
 	AVAudioSessionRouteChangeReason reasonValue = [notification.userInfo[@"AVAudioSessionRouteChangeReasonKey"] unsignedIntegerValue];
+	AVAudioSessionRouteDescription *previousRoute = notification.userInfo[AVAudioSessionRouteChangePreviousRouteKey];
+	[self logRoute:[NSString stringWithFormat:@"route change %@ (was out=%@ in=%@)", AudioToggleReasonName(reasonValue),
+		AudioTogglePorts(previousRoute.outputs), AudioTogglePorts(previousRoute.inputs)]];
 	AVAudioSessionRouteDescription* currentRoute = [AVAudioSession sharedInstance].currentRoute;
 	if([currentRoute.outputs count] > 0 && (reasonValue == AVAudioSessionRouteChangeReasonOverride || reasonValue == AVAudioSessionRouteChangeReasonCategoryChange)) {
 		AVAudioSessionPortDescription *output = currentRoute.outputs.firstObject;
