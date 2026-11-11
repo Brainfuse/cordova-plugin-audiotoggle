@@ -22,7 +22,6 @@ import org.apache.cordova.PluginResult;
 import org.apache.cordova.PluginResult.Status;
 import android.util.Log;
 import android.os.Build;
-import java.lang.reflect.InvocationTargetException;
 import android.content.pm.PackageManager;
 import android.media.AudioDeviceCallback;
 import android.os.Handler;
@@ -30,6 +29,10 @@ import android.os.Looper;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.Executor;
 
 public class AudioTogglePlugin extends CordovaPlugin {
@@ -43,11 +46,14 @@ public class AudioTogglePlugin extends CordovaPlugin {
   public static final String ACTION_HAS_EARPIECE = "hasBuiltInEarpiece";
   public static final String ACTION_HAS_SPEAKER = "hasBuiltInSpeaker";
   public static final String ACIONT_REGISTER_LISTENER = "registerListener";
+  public static final String ACTION_GET_AUDIO_ROUTES = "getAudioRoutes";
+  public static final String ACTION_SET_AUDIO_ROUTE = "setAudioRoute";
 
   private static final String LOG_TAG = "AudioTogglePlugin";
   private static final String BLUETOOTH_CONNECT = "android.permission.BLUETOOTH_CONNECT";
   private static final int BLUETOOTH_PERMISSION_REQUEST = 4101;
   private static final String MODE_LISTENER_CLASS = "android.media.AudioManager$OnModeChangedListener";
+  private static final String DEVICE_LISTENER_CLASS = "android.media.AudioManager$OnCommunicationDeviceChangedListener";
   private static final int TYPE_USB_HEADSET = 22;
   private static final int TYPE_HEARING_AID = 23;
   private static final int TYPE_BLE_HEADSET = 26;
@@ -58,8 +64,11 @@ public class AudioTogglePlugin extends CordovaPlugin {
   BroadcastReceiver scoReceiver;
   AudioDeviceCallback deviceCallback;
   Object modeListener;
+  Object communicationDeviceListener;
   boolean bluetoothPermissionRequested;
   String lastLoggedRoute;
+  CallbackContext routesListener;
+  String lastSentRoutes;
 
   public AudioTogglePlugin(){
     receiver = null;
@@ -99,14 +108,31 @@ public class AudioTogglePlugin extends CordovaPlugin {
       }
 
       logRoute("setAudioMode " + args.getString(0));
+      sendRoutes();
       return true;
     } else if (action.equals(ACTION_SET_BLUETOOTH_ON)) {
       setBluetoothScoOn(args.getBoolean(0));
       logRoute("setBluetoothScoOn " + args.getBoolean(0));
+      sendRoutes();
       return true;
     } else if (action.equals(ACTION_SET_SPEAKER_ON)) {
       setSpeakerphoneOn(args.getBoolean(0));
       logRoute("setSpeakerphoneOn " + args.getBoolean(0));
+      sendRoutes();
+      return true;
+    } else if (action.equals(ACTION_GET_AUDIO_ROUTES)) {
+      callbackContext.success(getAudioRoutes());
+      return true;
+    } else if (action.equals(ACTION_SET_AUDIO_ROUTE)) {
+      String routeId = args.getString(0);
+      if (!setAudioRoute(routeId)) {
+        logRoute("setAudioRoute " + routeId + " failed");
+        callbackContext.error("Unknown audio route " + routeId);
+        return true;
+      }
+      logRoute("setAudioRoute " + routeId);
+      sendRoutes();
+      callbackContext.success();
       return true;
     } else if (action.equals(ACTION_GET_OUTPUT_DEVICES)) {
       callbackContext.success(getOutputDevices());
@@ -131,6 +157,9 @@ public class AudioTogglePlugin extends CordovaPlugin {
       String eventName = args.getString(0);
       if("speaker".equalsIgnoreCase(eventName)){
         this.speakerListener = callbackContext;
+      } else if ("routes".equalsIgnoreCase(eventName)) {
+        this.routesListener = callbackContext;
+        this.lastSentRoutes = null;
       }
       return true;
     }
@@ -212,20 +241,11 @@ public class AudioTogglePlugin extends CordovaPlugin {
   }
 
   private void setCommunicationDevice(AudioManager mgr, int deviceType) {
-      try {
-          List<AudioDeviceInfo> devices = (List<AudioDeviceInfo>) mgr.getClass().getMethod("getAvailableCommunicationDevices").invoke(mgr);
-          for (AudioDeviceInfo device : devices) {
-              if (device.getType() == deviceType) {
-                  mgr.getClass().getMethod("setCommunicationDevice").invoke(mgr, device);
-                  return;
-              }
+      for (AudioDeviceInfo device : getAvailableCommunicationDevices(mgr)) {
+          if (device.getType() == deviceType) {
+              setCommunicationDevice(mgr, device);
+              return;
           }
-      } catch (IllegalAccessException e){
-          e.printStackTrace();
-      } catch(InvocationTargetException e){
-          e.printStackTrace();
-      } catch(NoSuchMethodException e) {
-          e.printStackTrace();
       }
   }
 
@@ -335,15 +355,8 @@ public class AudioTogglePlugin extends CordovaPlugin {
     if (deviceCallback != null) {
       getAudioManager().unregisterAudioDeviceCallback(deviceCallback);
     }
-    if (modeListener != null) {
-      try {
-        AudioManager audioManager = getAudioManager();
-        audioManager.getClass().getMethod("removeOnModeChangedListener", Class.forName(MODE_LISTENER_CLASS))
-            .invoke(audioManager, modeListener);
-      } catch (Exception e) {
-        Log.w(LOG_TAG, "removeOnModeChangedListener failed", e);
-      }
-    }
+    removeAudioManagerListener(MODE_LISTENER_CLASS, modeListener);
+    removeAudioManagerListener(DEVICE_LISTENER_CLASS, communicationDeviceListener);
     super.onDestroy();
   }
 
@@ -364,6 +377,7 @@ public class AudioTogglePlugin extends CordovaPlugin {
       public void onReceive(Context context, Intent intent) {
         int state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, AudioManager.SCO_AUDIO_STATE_ERROR);
         logRoute("bluetooth sco " + scoStateName(state));
+        sendRoutes();
       }
     };
     webView.getContext().registerReceiver(scoReceiver, new IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED));
@@ -374,49 +388,215 @@ public class AudioTogglePlugin extends CordovaPlugin {
         public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
           logRoute("devices added " + describeDevices(addedDevices));
           maybeRequestBluetoothPermission("audio device added");
+          sendRoutes();
         }
 
         @Override
         public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
           logRoute("devices removed " + describeDevices(removedDevices));
+          sendRoutes();
         }
       };
       audioManager.registerAudioDeviceCallback(deviceCallback, null);
     }
 
     if (isAfter31()) {
-      addModeChangedListener(audioManager);
+      modeListener = addAudioManagerListener(audioManager, MODE_LISTENER_CLASS, new Runnable() {
+        @Override
+        public void run() {
+          logRoute("mode changed");
+          maybeRequestBluetoothPermission("call audio started");
+          sendRoutes();
+        }
+      });
+      communicationDeviceListener = addAudioManagerListener(audioManager, DEVICE_LISTENER_CLASS, new Runnable() {
+        @Override
+        public void run() {
+          logRoute("communication device changed");
+          sendRoutes();
+        }
+      });
     }
   }
 
-  /* OnModeChangedListener is API 31 and the build compiles against an older
-   * SDK, so the listener is a Proxy registered by reflection. */
-  private void addModeChangedListener(AudioManager audioManager) {
+  /* The API 31 AudioManager listeners can't be named when compiling against
+   * an older SDK, so each one is a Proxy added by reflection through
+   * add<ListenerName>(Executor, listener). */
+  private Object addAudioManagerListener(AudioManager audioManager, String className, final Runnable onEvent) {
     try {
-      Class<?> listenerClass = Class.forName(MODE_LISTENER_CLASS);
-      modeListener = Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] { listenerClass },
+      Class<?> listenerClass = Class.forName(className);
+      Object listener = Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] { listenerClass },
           new InvocationHandler() {
             @Override
             public Object invoke(Object proxy, Method method, Object[] args) {
-              if ("onModeChanged".equals(method.getName())) {
-                logRoute("mode changed");
-                maybeRequestBluetoothPermission("call audio started");
-                return null;
-              }
               if ("equals".equals(method.getName())) {
                 return proxy == args[0];
               }
               if ("hashCode".equals(method.getName())) {
                 return System.identityHashCode(proxy);
               }
-              return "AudioToggleModeListener";
+              if ("toString".equals(method.getName())) {
+                return "AudioToggleListener";
+              }
+              onEvent.run();
+              return null;
             }
           });
-      audioManager.getClass().getMethod("addOnModeChangedListener", Executor.class, listenerClass)
-          .invoke(audioManager, mainThreadExecutor(), modeListener);
+      audioManager.getClass().getMethod("add" + listenerClass.getSimpleName(), Executor.class, listenerClass)
+          .invoke(audioManager, mainThreadExecutor(), listener);
+      return listener;
     } catch (Exception e) {
-      modeListener = null;
-      Log.w(LOG_TAG, "addOnModeChangedListener failed", e);
+      Log.w(LOG_TAG, "adding " + className + " failed", e);
+      return null;
+    }
+  }
+
+  private void removeAudioManagerListener(String className, Object listener) {
+    if (listener == null) {
+      return;
+    }
+    try {
+      Class<?> listenerClass = Class.forName(className);
+      AudioManager audioManager = getAudioManager();
+      audioManager.getClass().getMethod("remove" + listenerClass.getSimpleName(), listenerClass)
+          .invoke(audioManager, listener);
+    } catch (Exception e) {
+      Log.w(LOG_TAG, "removing " + className + " failed", e);
+    }
+  }
+
+  private JSONArray getAudioRoutes() throws JSONException {
+    JSONArray routes = new JSONArray();
+    if (Build.VERSION.SDK_INT < 23) {
+      return routes;
+    }
+    AudioManager audioManager = getAudioManager();
+    List<AudioDeviceInfo> devices = isAfter31() ? getAvailableCommunicationDevices(audioManager)
+        : Arrays.asList(audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS));
+    Map<String, JSONObject> byId = new LinkedHashMap<String, JSONObject>();
+    for (AudioDeviceInfo device : devices) {
+      String id = routeId(device);
+      if (id != null && !byId.containsKey(id)) {
+        byId.put(id, new JSONObject().put("id", id).put("type", routeType(device.getType()))
+            .put("name", String.valueOf(device.getProductName())).put("selected", false));
+      }
+    }
+    if (byId.containsKey("wired")) {
+      byId.remove("earpiece");
+    }
+    String selected = selectedRouteId(audioManager, byId);
+    for (JSONObject route : byId.values()) {
+      route.put("selected", route.getString("id").equals(selected));
+      routes.put(route);
+    }
+    return routes;
+  }
+
+  private String routeType(int type) {
+    switch (type) {
+      case AudioDeviceInfo.TYPE_BUILTIN_EARPIECE: return "earpiece";
+      case AudioDeviceInfo.TYPE_BUILTIN_SPEAKER: return "speaker";
+      case AudioDeviceInfo.TYPE_WIRED_HEADSET:
+      case AudioDeviceInfo.TYPE_WIRED_HEADPHONES:
+      case TYPE_USB_HEADSET: return "wired";
+      case AudioDeviceInfo.TYPE_BLUETOOTH_SCO:
+      case TYPE_BLE_HEADSET:
+      case TYPE_HEARING_AID: return "bluetooth";
+      default: return null;
+    }
+  }
+
+  private String routeId(AudioDeviceInfo device) {
+    String type = routeType(device.getType());
+    if (type == null) {
+      return null;
+    }
+    return "bluetooth".equals(type) ? "bluetooth:" + device.getId() : type;
+  }
+
+  private String selectedRouteId(AudioManager audioManager, Map<String, JSONObject> routes) {
+    if (isAfter31()) {
+      AudioDeviceInfo device = getCommunicationDevice(audioManager);
+      if (device != null && routeId(device) != null) {
+        return routeId(device);
+      }
+    } else if (audioManager.isSpeakerphoneOn()) {
+      return "speaker";
+    } else if (audioManager.isBluetoothScoOn()) {
+      for (String id : routes.keySet()) {
+        if (id.startsWith("bluetooth:")) {
+          return id;
+        }
+      }
+    }
+    return routes.containsKey("wired") ? "wired" : "earpiece";
+  }
+
+  private boolean setAudioRoute(String id) {
+    AudioManager audioManager = getAudioManager();
+    if (isAfter31()) {
+      for (AudioDeviceInfo device : getAvailableCommunicationDevices(audioManager)) {
+        if (id.equals(routeId(device))) {
+          return setCommunicationDevice(audioManager, device);
+        }
+      }
+      return false;
+    }
+    if ("speaker".equals(id)) {
+      audioManager.stopBluetoothSco();
+      audioManager.setBluetoothScoOn(false);
+      audioManager.setSpeakerphoneOn(true);
+    } else if (id.startsWith("bluetooth:")) {
+      audioManager.setSpeakerphoneOn(false);
+      audioManager.startBluetoothSco();
+      audioManager.setBluetoothScoOn(true);
+    } else if ("earpiece".equals(id) || "wired".equals(id)) {
+      audioManager.stopBluetoothSco();
+      audioManager.setBluetoothScoOn(false);
+      audioManager.setSpeakerphoneOn(false);
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  private void sendRoutes() {
+    if (routesListener == null) {
+      return;
+    }
+    try {
+      JSONArray routes = getAudioRoutes();
+      String json = routes.toString();
+      if (json.equals(lastSentRoutes)) {
+        return;
+      }
+      lastSentRoutes = json;
+      PluginResult result = new PluginResult(Status.OK, routes);
+      result.setKeepCallback(true);
+      routesListener.sendPluginResult(result);
+    } catch (JSONException e) {
+      Log.w(LOG_TAG, "routes event failed", e);
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private List<AudioDeviceInfo> getAvailableCommunicationDevices(AudioManager audioManager) {
+    try {
+      return (List<AudioDeviceInfo>) audioManager.getClass().getMethod("getAvailableCommunicationDevices")
+          .invoke(audioManager);
+    } catch (Exception e) {
+      Log.w(LOG_TAG, "getAvailableCommunicationDevices failed", e);
+      return new ArrayList<AudioDeviceInfo>();
+    }
+  }
+
+  private boolean setCommunicationDevice(AudioManager audioManager, AudioDeviceInfo device) {
+    try {
+      return (Boolean) audioManager.getClass().getMethod("setCommunicationDevice", AudioDeviceInfo.class)
+          .invoke(audioManager, device);
+    } catch (Exception e) {
+      Log.w(LOG_TAG, "setCommunicationDevice failed", e);
+      return false;
     }
   }
 

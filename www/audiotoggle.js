@@ -38,6 +38,16 @@ exports.getAudioMode = function (callback) {
   cordova.exec(callback, null, 'AudioTogglePlugin', 'getAudioMode', []);
 };
 
+// [{id, type: 'earpiece'|'speaker'|'wired'|'bluetooth', name, selected}];
+// on('routes', callback) receives the same list whenever it changes.
+exports.getAudioRoutes = function (success, error) {
+	cordova.exec(success, error, 'AudioTogglePlugin', 'getAudioRoutes', []);
+};
+
+exports.setAudioRoute = function (id, success, error) {
+	cordova.exec(success, error, 'AudioTogglePlugin', 'setAudioRoute', [id]);
+};
+
 exports.isBluetoothScoOn = function (callback) {
 	cordova.exec(callback, null, 'AudioTogglePlugin', 'isBluetoothScoOn', []);
 };

@@ -27,6 +27,16 @@ static NSString *AudioTogglePorts(NSArray<AVAudioSessionPortDescription *> *port
 	return [NSString stringWithFormat:@"[%@]", [names componentsJoinedByString:@", "]];
 }
 
+static NSDictionary *AudioToggleRoute(NSString *routeId, NSString *type, NSString *name, BOOL selected) {
+	return @{@"id": routeId, @"type": type, @"name": name ?: @"", @"selected": @(selected)};
+}
+
+static BOOL AudioToggleIsWiredPort(NSString *portType) {
+	return [portType isEqualToString:AVAudioSessionPortHeadsetMic]
+		|| [portType isEqualToString:AVAudioSessionPortHeadphones]
+		|| [portType isEqualToString:AVAudioSessionPortUSBAudio];
+}
+
 @interface AudioTogglePlugin()
 @property (nonatomic, strong) NSMutableDictionary *eventCallbacks;
 @property (nonatomic, strong) MPVolumeView *volumeView;
@@ -124,6 +134,91 @@ static NSString *AudioTogglePorts(NSArray<AVAudioSessionPortDescription *> *port
 		err ? [NSString stringWithFormat:@" error=%@", err.localizedDescription] : @""]];
 }
 
+- (NSArray<NSDictionary *> *) audioRoutes {
+	AVAudioSession *session = [AVAudioSession sharedInstance];
+	AVAudioSessionPortDescription *output = session.currentRoute.outputs.firstObject;
+	NSString *outputType = output.portType;
+	BOOL outputIsBluetooth = [outputType isEqualToString:AVAudioSessionPortBluetoothHFP];
+
+	AVAudioSessionPortDescription *wiredPort = AudioToggleIsWiredPort(outputType) ? output : nil;
+	for (AVAudioSessionPortDescription *input in session.availableInputs) {
+		if (!wiredPort && AudioToggleIsWiredPort(input.portType)) {
+			wiredPort = input;
+		}
+	}
+
+	NSMutableArray<NSDictionary *> *routes = [NSMutableArray array];
+	BOOL hasReceiver = [UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone;
+	if (wiredPort) {
+		[routes addObject:AudioToggleRoute(@"wired", @"wired", wiredPort.portName, AudioToggleIsWiredPort(outputType))];
+	} else if (hasReceiver) {
+		[routes addObject:AudioToggleRoute(@"earpiece", @"earpiece", @"", [outputType isEqualToString:AVAudioSessionPortBuiltInReceiver])];
+	}
+	for (AVAudioSessionPortDescription *input in session.availableInputs) {
+		if ([input.portType isEqualToString:AVAudioSessionPortBluetoothHFP]) {
+			BOOL selected = outputIsBluetooth
+				&& ([input.UID isEqualToString:output.UID] || [input.portName isEqualToString:output.portName]);
+			[routes addObject:AudioToggleRoute(input.UID, @"bluetooth", input.portName, selected)];
+		}
+	}
+	[routes addObject:AudioToggleRoute(@"speaker", @"speaker", @"", [outputType isEqualToString:AVAudioSessionPortBuiltInSpeaker])];
+	return routes;
+}
+
+- (AVAudioSessionPortDescription *) inputForRoute:(NSString *)routeId {
+	for (AVAudioSessionPortDescription *input in [AVAudioSession sharedInstance].availableInputs) {
+		if (([routeId isEqualToString:@"earpiece"] && [input.portType isEqualToString:AVAudioSessionPortBuiltInMic])
+			|| ([routeId isEqualToString:@"wired"] && AudioToggleIsWiredPort(input.portType))
+			|| [routeId isEqualToString:input.UID]) {
+			return input;
+		}
+	}
+	return nil;
+}
+
+- (void) getAudioRoutes:(CDVInvokedUrlCommand *)command {
+	[self.commandDelegate runInBackground:^{
+		CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:[self audioRoutes]];
+		[self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+	}];
+}
+
+/* Only the output override and the preferred input change here. The session
+ * category belongs to Twilio (voice) and iosrtc (video). */
+- (void) setAudioRoute:(CDVInvokedUrlCommand *)command {
+	NSString *routeId = [NSString stringWithFormat:@"%@", command.arguments.firstObject];
+	[self.commandDelegate runInBackground:^{
+		NSError *err = nil;
+		AVAudioSession *session = [AVAudioSession sharedInstance];
+		BOOL ok;
+		if ([routeId isEqualToString:@"speaker"]) {
+			ok = [session overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:&err];
+		} else {
+			AVAudioSessionPortDescription *input = [self inputForRoute:routeId];
+			BOOL headphonesWithoutMic = !input && [routeId isEqualToString:@"wired"];
+			ok = (input || headphonesWithoutMic)
+				&& [session overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:&err]
+				&& [session setPreferredInput:input error:&err];
+		}
+		[self logRoute:[NSString stringWithFormat:@"setAudioRoute %@%@%@", routeId, ok ? @"" : @" failed",
+			err ? [NSString stringWithFormat:@" error=%@", err.localizedDescription] : @""]];
+		CDVPluginResult *result = ok
+			? [CDVPluginResult resultWithStatus:CDVCommandStatus_OK]
+			: [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[NSString stringWithFormat:@"Unknown audio route %@", routeId]];
+		[self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+	}];
+}
+
+- (void) sendRoutes {
+	NSString *callbackId = [self callbackIdForEvent:@"routes"];
+	if (!callbackId) {
+		return;
+	}
+	CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:[self audioRoutes]];
+	[result setKeepCallbackAsBool:YES];
+	[self.commandDelegate sendPluginResult:result callbackId:callbackId];
+}
+
 - (void) logRoute:(NSString *)why {
 	AVAudioSession *session = [AVAudioSession sharedInstance];
 	AVAudioSessionRouteDescription *route = session.currentRoute;
@@ -168,6 +263,7 @@ static NSString *AudioTogglePorts(NSArray<AVAudioSessionPortDescription *> *port
 	AVAudioSessionRouteDescription *previousRoute = notification.userInfo[AVAudioSessionRouteChangePreviousRouteKey];
 	[self logRoute:[NSString stringWithFormat:@"route change %@ (was out=%@ in=%@)", AudioToggleReasonName(reasonValue),
 		AudioTogglePorts(previousRoute.outputs), AudioTogglePorts(previousRoute.inputs)]];
+	[self sendRoutes];
 	AVAudioSessionRouteDescription* currentRoute = [AVAudioSession sharedInstance].currentRoute;
 	if([currentRoute.outputs count] > 0 && (reasonValue == AVAudioSessionRouteChangeReasonOverride || reasonValue == AVAudioSessionRouteChangeReasonCategoryChange)) {
 		AVAudioSessionPortDescription *output = currentRoute.outputs.firstObject;
